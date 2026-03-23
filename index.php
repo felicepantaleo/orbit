@@ -95,8 +95,29 @@ function stream_file(string $full_path, bool $download = false): void
         throw new Exception('File not found');
     }
 
-    $mime = function_exists('mime_content_type') ? mime_content_type($full_path) : 'application/octet-stream';
+    // Deny streaming of this script, dotfiles, and sensitive script/config files
     $name = basename($full_path);
+    // Block the current script (e.g., index.php)
+    if ($name === basename(__FILE__)) {
+        throw new Exception('Access denied');
+    }
+    // Block dotfiles (e.g., .env, .gitignore)
+    if ($name !== '' && $name[0] === '.') {
+        throw new Exception('Access denied');
+    }
+    // Block common script and configuration extensions
+    $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+    $blockedExts = [
+        'php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'php8',
+        'phar',
+        'ini', 'env', 'conf', 'config', 'cnf',
+        'htaccess', 'htpasswd'
+    ];
+    if ($ext !== '' && in_array($ext, $blockedExts, true)) {
+        throw new Exception('Access denied');
+    }
+
+    $mime = function_exists('mime_content_type') ? mime_content_type($full_path) : 'application/octet-stream';
     $size = filesize($full_path);
 
     header_remove('Content-Type');
