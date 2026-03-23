@@ -1,14 +1,14 @@
 <?php
 /**
- * CERN EOS Folder Browser
- * A comprehensive web-based file browser for CERN EOS storage
+ * Orbit Browser
+ * A comprehensive web-based file browser for any web-exposed folder
  *
  * Features: search, filters, sorting, image previews, PDF viewer,
  * EXIF metadata, file type recognition, dark mode, keyboard navigation
  */
 
 define('BASE_DIR', __DIR__);
-define('VERSION', '1.0.0');
+define('VERSION', '1.1.0');
 
 // ─── CONSTANTS (must be defined before any function calls) ────────────────────
 
@@ -31,30 +31,41 @@ define('TYPE_MAP', [
 // ─── PHP BACKEND API ───────────────────────────────────────────────────────────
 
 if (isset($_GET['action'])) {
-    header('Content-Type: application/json; charset=utf-8');
     header('X-Content-Type-Options: nosniff');
     header('X-Frame-Options: SAMEORIGIN');
 
     try {
         switch ($_GET['action']) {
             case 'list':
+                header('Content-Type: application/json; charset=utf-8');
                 $path  = get_safe_path($_GET['path'] ?? '/');
                 echo json_encode(list_directory($path));
                 break;
             case 'meta':
+                header('Content-Type: application/json; charset=utf-8');
                 $path  = get_safe_path($_GET['path'] ?? '/');
                 echo json_encode(get_file_metadata($path));
                 break;
             case 'search':
+                header('Content-Type: application/json; charset=utf-8');
                 $base  = get_safe_path($_GET['path'] ?? '/');
                 $query = trim($_GET['query'] ?? '');
                 echo json_encode(search_files($base, $query));
                 break;
+            case 'file':
+                $path = get_safe_path($_GET['path'] ?? '/');
+                $download = isset($_GET['download']) && $_GET['download'] === '1';
+                stream_file($path, $download);
+                break;
             default:
+                header('Content-Type: application/json; charset=utf-8');
                 http_response_code(400);
                 echo json_encode(['error' => 'Unknown action']);
         }
     } catch (Exception $e) {
+        if (!headers_sent()) {
+            header('Content-Type: application/json; charset=utf-8');
+        }
         http_response_code(400);
         echo json_encode(['error' => $e->getMessage()]);
     }
@@ -75,6 +86,32 @@ function get_safe_path(string $rel): string
         throw new Exception('Invalid or inaccessible path');
     }
     return $full;
+}
+
+
+function stream_file(string $full_path, bool $download = false): void
+{
+    if (!file_exists($full_path) || !is_file($full_path)) {
+        throw new Exception('File not found');
+    }
+
+    $mime = function_exists('mime_content_type') ? mime_content_type($full_path) : 'application/octet-stream';
+    $name = basename($full_path);
+    $size = filesize($full_path);
+
+    header_remove('Content-Type');
+    header('Content-Type: ' . $mime);
+    header('Content-Length: ' . (string)$size);
+    header(sprintf("Content-Disposition: %s; filename=\"%s\"; filename*=UTF-8''%s", $download ? 'attachment' : 'inline', rawurlencode($name), rawurlencode($name))); 
+    header('Accept-Ranges: bytes');
+
+    $fp = fopen($full_path, 'rb');
+    if ($fp === false) {
+        throw new Exception('Cannot open file');
+    }
+
+    fpassthru($fp);
+    fclose($fp);
 }
 
 // ─── DIRECTORY LISTING ───────────────────────────────────────────────────────
@@ -360,8 +397,8 @@ function search_files(string $base_path, string $query, int $max = 200): array
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Folder Browser · CERN EOS</title>
-  <meta name="description" content="Interactive folder browser for CERN EOS storage" />
+  <title>Orbit · Universal Folder Browser</title>
+  <meta name="description" content="Interactive browser for any web-exposed folder or file collection" />
   <style>
     /* ── Reset & Base ─────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -848,8 +885,8 @@ function search_files(string $base_path, string $query, int $max = 200): array
       <line x1="8" y1="16" x2="24" y2="16" stroke="white" stroke-width="1.5"/>
     </svg>
     <div>
-      <div class="logo-text">Folder Browser</div>
-      <div class="logo-sub">CERN EOS</div>
+      <div class="logo-text">Orbit</div>
+      <div class="logo-sub">Universal folder browser</div>
     </div>
   </a>
 
@@ -1238,7 +1275,7 @@ function renderFiles() {
 
 function renderGridCard(item, idx) {
   const icon  = FILE_ICONS[item.type] || '📄';
-  const thumb = item.is_image ? `<img data-src="${encodeItemPath(item.path)}" alt="${esc(item.name)}" loading="lazy">` : `<span class="type-icon">${icon}</span>`;
+  const thumb = item.is_image ? `<img data-src="${buildFileUrl(item.path)}" alt="${esc(item.name)}" loading="lazy">` : `<span class="type-icon">${icon}</span>`;
   const size  = item.size !== null ? formatSize(item.size) : '—';
   const badge = `<span class="type-badge badge-${item.type}">${item.type}</span>`;
 
@@ -1255,7 +1292,7 @@ function renderGridCard(item, idx) {
 
 function renderListItem(item, idx) {
   const icon = item.is_image
-    ? `<img class="list-img-thumb" data-src="${encodeItemPath(item.path)}" alt="">`
+    ? `<img class="list-img-thumb" data-src="${buildFileUrl(item.path)}" alt="">`
     : FILE_ICONS[item.type] || '📄';
   const size  = item.size !== null ? formatSize(item.size) : '—';
   const badge = `<span class="type-badge badge-${item.type}">${item.type}</span>`;
@@ -1302,7 +1339,7 @@ function openPreview(idx) {
   const overlay = document.getElementById('preview-overlay');
   document.getElementById('preview-title').textContent = item.name;
   const dl = document.getElementById('btn-download');
-  dl.href = encodeItemPath(item.path);
+  dl.href = buildFileUrl(item.path, true);
   dl.download = item.name;
 
   const body = document.getElementById('preview-body');
@@ -1315,7 +1352,7 @@ function openPreview(idx) {
 }
 
 async function renderPreviewContent(item, body) {
-  const path = encodeItemPath(item.path);
+  const path = buildFileUrl(item.path);
 
   if (item.is_image) {
     body.innerHTML = `<img id="preview-img" src="${path}" alt="${esc(item.name)}" />`;
@@ -1361,7 +1398,7 @@ async function renderPreviewContent(item, body) {
         <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>
       </svg>
       <p>No preview available for <strong>.${item.extension}</strong></p>
-      <a class="btn-primary" href="${path}" download="${esc(item.name)}">⬇ Download</a>
+      <a class="btn-primary" href="${buildFileUrl(item.path, true)}" download="${esc(item.name)}">⬇ Download</a>
     </div>`;
 }
 
@@ -1482,7 +1519,7 @@ async function showMetaPanel(item) {
     if (item.is_image) {
       const imgIdx = state.filtered.indexOf(item);
       const clickHandler = imgIdx >= 0 ? `openPreview(${imgIdx})` : '';
-      html += `<div class="meta-section"><img class="meta-img-thumb" src="${encodeItemPath(item.path)}" alt="${esc(item.name)}"${clickHandler ? ` onclick="${clickHandler}"` : ''}></div>`;
+      html += `<div class="meta-section"><img class="meta-img-thumb" src="${buildFileUrl(item.path)}" alt="${esc(item.name)}"${clickHandler ? ` onclick="${clickHandler}"` : ''}></div>`;
     }
 
     html += `<div class="meta-section"><h4>General</h4>
@@ -1493,8 +1530,8 @@ async function showMetaPanel(item) {
       ${metaRow('MIME', m.mime_type)}
       ${m.extension ? metaRow('Extension', '.' + m.extension) : ''}
       <div class="meta-row" style="margin-top:8px">
-        <a class="btn-primary" href="${encodeItemPath(item.path)}" download="${esc(item.name)}" style="font-size:.78rem;padding:5px 12px">⬇ Download</a>
-        <button class="btn-primary" onclick="copyLink('${encodeItemPath(item.path)}')" style="font-size:.78rem;padding:5px 12px;background:var(--c-surface-2);color:var(--c-text)">🔗 Copy link</button>
+        <a class="btn-primary" href="${buildFileUrl(item.path, true)}" download="${esc(item.name)}" style="font-size:.78rem;padding:5px 12px">⬇ Download</a>
+        <button class="btn-primary" onclick="copyLink('${buildFileUrl(item.path)}')" style="font-size:.78rem;padding:5px 12px;background:var(--c-surface-2);color:var(--c-text)">🔗 Copy link</button>
       </div>
     </div>`;
 
@@ -1595,8 +1632,10 @@ function esc(str) {
   return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function encodeItemPath(path) {
-  return path.split('/').map(p => encodeURIComponent(p)).join('/');
+function buildFileUrl(path, download = false) {
+  const params = new URLSearchParams({ action: 'file', path });
+  if (download) params.set('download', '1');
+  return `?${params.toString()}`;
 }
 
 function formatSize(bytes) {
@@ -1784,7 +1823,7 @@ document.getElementById('btn-preview-meta').addEventListener('click', () => {
 
 document.getElementById('btn-copy-link').addEventListener('click', () => {
   const item = state.filtered[state.previewIndex];
-  if (item) copyLink(encodeItemPath(item.path));
+  if (item) copyLink(buildFileUrl(item.path));
 });
 
 document.getElementById('logo-link').addEventListener('click', (e) => {
