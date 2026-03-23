@@ -1559,7 +1559,7 @@ async function showMetaPanel(item) {
       ${m.extension ? metaRow('Extension', '.' + m.extension) : ''}
       <div class="meta-row" style="margin-top:8px">
         <a class="btn-primary" href="${buildFileUrl(item.path, true)}" download="${esc(item.name)}" style="font-size:.78rem;padding:5px 12px">⬇ Download</a>
-        <button class="btn-primary" onclick="copyLink('${buildFileUrl(item.path)}')" style="font-size:.78rem;padding:5px 12px;background:var(--c-surface-2);color:var(--c-text)">🔗 Copy link</button>
+        <button class="btn-primary" onclick="copyLink('${window.location.pathname}${buildFileUrl(item.path)}')" style="font-size:.78rem;padding:5px 12px;background:var(--c-surface-2);color:var(--c-text)">🔗 Copy link</button>
       </div>
     </div>`;
 
