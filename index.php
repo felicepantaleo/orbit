@@ -119,18 +119,25 @@ function stream_file(string $full_path, bool $download = false): void
 
     $mime = function_exists('mime_content_type') ? mime_content_type($full_path) : 'application/octet-stream';
     $size = filesize($full_path);
-
-    header_remove('Content-Type');
-    header('Content-Type: ' . $mime);
-    header('Content-Length: ' . (string)$size);
-    header(sprintf("Content-Disposition: %s; filename=\"%s\"; filename*=UTF-8''%s", $download ? 'attachment' : 'inline', rawurlencode($name), rawurlencode($name))); 
-    header('Accept-Ranges: bytes');
+    if ($size === false) {
+        throw new Exception('Cannot determine file size');
+    }
 
     $fp = fopen($full_path, 'rb');
     if ($fp === false) {
         throw new Exception('Cannot open file');
     }
 
+    header_remove('Content-Type');
+    header('Content-Type: ' . $mime);
+    header('Content-Length: ' . (string)$size);
+    header(sprintf(
+        "Content-Disposition: %s; filename=\"%s\"; filename*=UTF-8''%s",
+        $download ? 'attachment' : 'inline',
+        rawurlencode($name),
+        rawurlencode($name)
+    ));
+    header('Accept-Ranges: bytes');
     fpassthru($fp);
     fclose($fp);
 }
