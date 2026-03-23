@@ -1726,8 +1726,7 @@ document.addEventListener('keydown', (e) => {
 // ═══════════════════════════════════════════════════════════════
 function initDarkMode() {
   const stored = localStorage.getItem('fb-theme');
-  const prefer = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const dark   = stored ? stored === 'dark' : prefer;
+  const dark   = stored ? stored === 'dark' : true;
   setDark(dark);
 }
 
