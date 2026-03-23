@@ -1,0 +1,61 @@
+# ─── Folder Browser – Apache configuration ───────────────────────────────────
+
+# Use index.php as directory index
+DirectoryIndex index.php index.html
+
+# ─── Security headers ─────────────────────────────────────────────────────────
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options    "nosniff"
+    Header always set X-Frame-Options           "SAMEORIGIN"
+    Header always set X-XSS-Protection          "1; mode=block"
+    Header always set Referrer-Policy           "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy        "geolocation=(), microphone=(), camera=()"
+    # Remove server version info
+    Header unset Server
+    Header unset X-Powered-By
+</IfModule>
+
+# ─── Prevent access to sensitive files ───────────────────────────────────────
+<FilesMatch "^(\.htaccess|\.htpasswd|\.git|\.env|composer\.(json|lock)|package\.json)$">
+    Require all denied
+</FilesMatch>
+
+# ─── MIME types for scientific/HEP file formats ───────────────────────────────
+<IfModule mod_mime.c>
+    AddType application/x-hdf          .h5 .hdf5
+    AddType application/x-root         .root
+    AddType application/x-parquet      .parquet
+    AddType application/x-feather      .feather
+    AddType application/x-fits         .fits
+    AddType application/x-ipynb+json   .ipynb
+    AddType text/csv                   .csv .tsv
+    AddType text/markdown              .md
+    AddType text/x-rst                 .rst
+    AddType text/x-tex                 .tex
+    AddType application/json           .json
+    AddType text/yaml                  .yaml .yml
+</IfModule>
+
+# ─── Enable compression ───────────────────────────────────────────────────────
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/css application/javascript
+    AddOutputFilterByType DEFLATE application/json text/plain text/xml
+</IfModule>
+
+# ─── Cache control for static assets ─────────────────────────────────────────
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType image/jpeg                "access plus 1 week"
+    ExpiresByType image/png                 "access plus 1 week"
+    ExpiresByType image/gif                 "access plus 1 week"
+    ExpiresByType image/webp                "access plus 1 week"
+    ExpiresByType image/svg+xml             "access plus 1 week"
+    ExpiresByType application/pdf           "access plus 1 day"
+    ExpiresByType text/css                  "access plus 1 day"
+    ExpiresByType application/javascript    "access plus 1 day"
+</IfModule>
+
+# ─── Enable PHP short tags (if needed) ───────────────────────────────────────
+<IfModule mod_php.c>
+    php_flag short_open_tag off
+</IfModule>
