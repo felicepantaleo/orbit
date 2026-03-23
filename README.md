@@ -88,8 +88,4 @@ Edit the `CONFIG` object in `index.php` to change defaults such as the initial v
 
 To rename the app again, update the `<title>`, header logo text, and subtitle in `index.php`.
 
----
 
-## License
-
-MIT – see [LICENSE](LICENSE).
