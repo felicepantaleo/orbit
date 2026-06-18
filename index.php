@@ -1528,6 +1528,10 @@ async function previewGraph(item, body, path) {
     if (!window.d3 || !window.d3.select(document.body).graphviz)
       throw new Error('Graphviz renderer unavailable');
 
+    // Honour the engine the DOT declares (e.g. layout=neato for a radial layout).
+    const engMatch = dot.match(/layout\s*=\s*"?([a-z]+)"?/i);
+    const engine = engMatch ? engMatch[1].toLowerCase() : 'dot';
+
     body.innerHTML = `<div id="preview-graph"></div>`;
     const container = body.querySelector('#preview-graph');
     await new Promise((resolve, reject) => {
@@ -1535,6 +1539,7 @@ async function previewGraph(item, body, path) {
       // WASM layout on the main thread (no cross-origin worker from the CDN).
       window.d3.select(container)
         .graphviz({ useWorker: false })
+        .engine(engine)
         .zoom(true)
         .fit(true)
         .onerror(err => reject(new Error(typeof err === 'string' ? err : 'render error')))
