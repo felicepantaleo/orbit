@@ -23,6 +23,7 @@ define('TYPE_MAP', [
                    'css','php','sh','bash','rb','go','rs','swift','kt','r','m','f90','f','jl'],
     'data'     => ['csv','tsv','json','xml','yaml','yml','hdf5','h5','root','parquet',
                    'feather','npy','npz','fits','dat','bin','hepmc'],
+    'graph'    => ['dot','gv'],
     'document' => ['txt','md','rst','tex','doc','docx','xls','xlsx','ppt','pptx','odt','ods','odp'],
     'archive'  => ['zip','tar','gz','bz2','xz','7z','rar','tgz','tar.gz','tar.bz2'],
     'notebook' => ['ipynb'],
@@ -710,6 +711,7 @@ function search_files(string $base_path, string $query, int $max = 200): array
     .badge-audio    { background: #f0fdf4; color: #166534; }
     .badge-code     { background: #f3e8ff; color: #7e22ce; }
     .badge-data     { background: #fdf2f8; color: #9d174d; }
+    .badge-graph    { background: #ecfeff; color: #0e7490; }
     .badge-document { background: #eff6ff; color: #1d4ed8; }
     .badge-archive  { background: #fff7ed; color: #c2410c; }
     .badge-notebook { background: #fefce8; color: #854d0e; }
@@ -719,6 +721,7 @@ function search_files(string $base_path, string $query, int $max = 200): array
     [data-theme="dark"] .badge-pdf      { background: #4c0519; color: #fca5a5; }
     [data-theme="dark"] .badge-code     { background: #3b0764; color: #d8b4fe; }
     [data-theme="dark"] .badge-data     { background: #4a044e; color: #f0abfc; }
+    [data-theme="dark"] .badge-graph    { background: #083344; color: #67e8f9; }
     [data-theme="dark"] .badge-document { background: #1e3a8a; color: #93c5fd; }
     [data-theme="dark"] .badge-notebook { background: #422006; color: #fde68a; }
     [data-theme="dark"] .badge-archive  { background: #431407; color: #fdba74; }
@@ -773,6 +776,20 @@ function search_files(string $base_path, string $query, int $max = 200): array
       transition: transform .2s ease;
     }
     #preview-img.zoomed { cursor: zoom-out; transform: scale(1.8); }
+
+    /* graph (.dot/.gv) preview */
+    #preview-graph {
+      width: min(1100px, 96vw); height: calc(100vh - 130px);
+      background: #fff; border-radius: var(--radius);
+      overflow: hidden; box-shadow: 0 8px 40px rgba(0,0,0,.6);
+    }
+    #preview-graph svg { width: 100%; height: 100%; cursor: grab; }
+    #preview-graph svg:active { cursor: grabbing; }
+    #preview-graph-fallback { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .preview-note {
+      font-size: .82rem; color: var(--c-text-2);
+      background: var(--c-surface-2); padding: 6px 12px; border-radius: 999px;
+    }
 
     /* PDF preview */
     #preview-iframe {
@@ -1042,6 +1059,12 @@ const CONFIG = {
   maxTextSize:  512 * 1024,      // 512 KB
   searchDelay:  300,             // ms debounce
   imgLazyThreshold: 200,         // px below viewport
+  graphMaxRenderBytes: 3 * 1024 * 1024,  // render .dot interactively up to 3 MB; larger -> pre-rendered SVG
+  graphvizCdn: [                 // loaded lazily, in order, on first graph preview
+    'https://cdn.jsdelivr.net/npm/@hpcc-js/wasm@2/dist/graphviz.umd.js',
+    'https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js',
+    'https://cdn.jsdelivr.net/npm/d3-graphviz@5/build/d3-graphviz.js',
+  ],
 };
 
 const FILTERS = [
@@ -1052,6 +1075,7 @@ const FILTERS = [
   { id: 'video',     label: '🎬 Video',      types: ['video'] },
   { id: 'audio',     label: '🎵 Audio',      types: ['audio'] },
   { id: 'data',      label: '📊 Data',       types: ['data'] },
+  { id: 'graph',     label: '📈 Graphs',     types: ['graph'] },
   { id: 'code',      label: '💻 Code',       types: ['code'] },
   { id: 'notebook',  label: '📓 Notebooks',  types: ['notebook'] },
   { id: 'document',  label: '📝 Documents',  types: ['document'] },
@@ -1060,7 +1084,7 @@ const FILTERS = [
 
 const FILE_ICONS = {
   directory: '📁', image: '🖼', pdf: '📄', video: '🎬', audio: '🎵',
-  code: '💻', data: '📊', document: '📝', archive: '📦', notebook: '📓',
+  code: '💻', data: '📊', graph: '📈', document: '📝', archive: '📦', notebook: '📓',
   other: '📄',
 };
 
@@ -1415,6 +1439,11 @@ async function renderPreviewContent(item, body) {
     return;
   }
 
+  if (item.type === 'graph') {
+    await previewGraph(item, body, path);
+    return;
+  }
+
   if (CONFIG.previewText.includes(item.extension)) {
     await previewText(item, body, path);
     return;
@@ -1442,6 +1471,77 @@ async function previewText(item, body, path) {
     body.appendChild(pre);
   } catch (e) {
     body.innerHTML = errorBox(e.message);
+  }
+}
+
+// ── Graphviz (.dot/.gv) interactive preview ─────────────────────────────────
+let _graphvizLibs = null;
+function loadGraphvizLibs() {
+  if (!_graphvizLibs) {
+    _graphvizLibs = CONFIG.graphvizCdn.reduce(
+      (chain, src) => chain.then(() => new Promise((resolve, reject) => {
+        // Reuse an already-injected tag (e.g. d3 from another feature).
+        if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+        const s = document.createElement('script');
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = () => reject(new Error('could not load ' + src));
+        document.head.appendChild(s);
+      })),
+      Promise.resolve()
+    );
+  }
+  return _graphvizLibs;
+}
+
+// The signal/full DOT views in the gallery have a sibling pre-rendered SVG; use it
+// as the fallback for graphs too large to lay out in the browser (or on any error).
+function graphSvgFallback(item, body, note) {
+  const svgUrl = buildFileUrl(item.path.replace(/\.(dot|gv)$/i, '.svg'));
+  body.innerHTML =
+    `<div id="preview-graph-fallback">` +
+    (note ? `<div class="preview-note">${esc(note)}</div>` : '') +
+    `<img id="preview-img" src="${svgUrl}" alt="${esc(item.name)}" /></div>`;
+  const img = body.querySelector('#preview-img');
+  img.addEventListener('click', () => img.classList.toggle('zoomed'));
+  img.addEventListener('error', () => {
+    body.innerHTML =
+      `<div class="state-box" style="color:#aaa">` +
+      `<p>This graph is too large to render in the browser, and no pre-rendered SVG is available.</p>` +
+      `<a class="btn-primary" href="${buildFileUrl(item.path, true)}" download="${esc(item.name)}">⬇ Download .${esc(item.extension)}</a></div>`;
+  });
+}
+
+async function previewGraph(item, body, path) {
+  // Big graphs (dense SIM cascades) would hang the in-browser layout: show the SVG.
+  if (item.size && item.size > CONFIG.graphMaxRenderBytes) {
+    graphSvgFallback(item, body, 'Large graph — showing the pre-rendered SVG. Download the .dot for the full interactive view.');
+    return;
+  }
+
+  body.innerHTML = `<div class="state-box" style="color:#aaa"><div class="spinner"></div><p>Rendering graph…</p></div>`;
+  try {
+    const res = await fetch(path);
+    if (!res.ok) throw new Error('Could not fetch graph');
+    const dot = await res.text();
+    await loadGraphvizLibs();
+    if (!window.d3 || !window.d3.select(document.body).graphviz)
+      throw new Error('Graphviz renderer unavailable');
+
+    body.innerHTML = `<div id="preview-graph"></div>`;
+    const container = body.querySelector('#preview-graph');
+    await new Promise((resolve, reject) => {
+      // zoom()/fit() are methods (not graphviz() options); useWorker:false keeps the
+      // WASM layout on the main thread (no cross-origin worker from the CDN).
+      window.d3.select(container)
+        .graphviz({ useWorker: false })
+        .zoom(true)
+        .fit(true)
+        .onerror(err => reject(new Error(typeof err === 'string' ? err : 'render error')))
+        .renderDot(dot, () => resolve());
+    });
+  } catch (e) {
+    graphSvgFallback(item, body, 'Interactive render unavailable (' + e.message + ') — showing the pre-rendered SVG.');
   }
 }
 
