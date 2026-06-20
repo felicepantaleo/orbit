@@ -58,6 +58,11 @@ if (isset($_GET['action'])) {
                 $download = isset($_GET['download']) && $_GET['download'] === '1';
                 stream_file($path, $download);
                 break;
+            case 'favicon':
+                header('Content-Type: image/svg+xml; charset=utf-8');
+                header('Cache-Control: public, max-age=86400');
+                echo orbit_favicon_svg();
+                break;
             default:
                 header('Content-Type: application/json; charset=utf-8');
                 http_response_code(400);
@@ -71,6 +76,31 @@ if (isset($_GET['action'])) {
         echo json_encode(['error' => $e->getMessage()]);
     }
     exit;
+}
+
+// ─── BRAND / FAVICON ──────────────────────────────────────────────────────────
+
+function orbit_favicon_svg(): string
+{
+    return <<<SVG
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0a63b8"/>
+      <stop offset="1" stop-color="#003f7a"/>
+    </linearGradient>
+    <linearGradient id="core" x1="9" y1="9" x2="23" y2="23" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffd27a"/>
+      <stop offset="1" stop-color="#e8650a"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="7" fill="url(#bg)"/>
+  <ellipse cx="16" cy="16" rx="12" ry="5.4" transform="rotate(-30 16 16)" fill="none" stroke="#ffffff" stroke-opacity="0.62" stroke-width="1.8"/>
+  <circle cx="16" cy="16" r="5.4" fill="url(#core)"/>
+  <circle cx="14" cy="14" r="1.7" fill="#ffffff" fill-opacity="0.35"/>
+  <circle cx="26.4" cy="10" r="2.2" fill="#ffffff"/>
+</svg>
+SVG;
 }
 
 // ─── PATH SECURITY ────────────────────────────────────────────────────────────
@@ -428,6 +458,8 @@ function search_files(string $base_path, string $query, int $max = 200): array
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Orbit · Universal Folder Browser</title>
   <meta name="description" content="Interactive browser for any web-exposed folder or file collection" />
+  <link rel="icon" type="image/svg+xml" href="?action=favicon" />
+  <meta name="theme-color" content="#0053a1" />
   <style>
     /* ── Reset & Base ─────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -667,7 +699,7 @@ function search_files(string $base_path, string $query, int $max = 200): array
       background: var(--c-surface); border: 1px solid var(--c-border);
       border-radius: var(--radius); padding: 10px 16px;
       display: grid;
-      grid-template-columns: 32px 1fr 100px 140px 90px;
+      grid-template-columns: 32px 1fr 100px 185px 90px;
       align-items: center; gap: 12px;
       cursor: pointer; transition: all var(--transition);
     }
@@ -686,7 +718,7 @@ function search_files(string $base_path, string $query, int $max = 200): array
 
     .list-header {
       padding: 6px 16px; display: grid;
-      grid-template-columns: 32px 1fr 100px 140px 90px;
+      grid-template-columns: 32px 1fr 100px 185px 90px;
       gap: 12px; font-size: .75rem; font-weight: 600;
       color: var(--c-text-3); text-transform: uppercase; letter-spacing: .05em;
     }
@@ -900,8 +932,10 @@ function search_files(string $base_path, string $query, int $max = 200): array
     /* ── Responsive ───────────────────────────────────────────────── */
     @media (max-width: 900px) {
       #file-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
-      .list-item { grid-template-columns: 32px 1fr 90px; }
-      .list-size, .list-type { display: none; }
+      .list-item, .list-header { grid-template-columns: 32px 1fr 165px; }
+      .list-size, .list-type,
+      .list-header span[data-sort-field="size"],
+      .list-header span[data-sort-field="type"] { display: none; }
     }
     @media (max-width: 600px) {
       #header { padding: 0 12px; }
@@ -909,8 +943,9 @@ function search_files(string $base_path, string $query, int $max = 200): array
       #toolbar { padding: 0 12px; height: auto; padding-top: 8px; padding-bottom: 8px; }
       #breadcrumb-bar { padding: 0 12px; }
       .logo-sub { display: none; }
-      .list-item { grid-template-columns: 32px 1fr; }
-      .list-date  { display: none; }
+      .list-item, .list-header { grid-template-columns: 32px 1fr; }
+      .list-date,
+      .list-header span[data-sort-field="date"] { display: none; }
       #file-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
     }
     @media (max-width: 420px) {
@@ -923,11 +958,18 @@ function search_files(string $base_path, string $query, int $max = 200): array
 <!-- ── Header ─────────────────────────────────────────────────────────── -->
 <header id="header">
   <a class="logo" href="?path=/" id="logo-link">
-    <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="16" cy="16" r="15" stroke="white" stroke-width="2"/>
-      <path d="M8 16a8 8 0 0 1 16 0" stroke="white" stroke-width="1.5"/>
-      <ellipse cx="16" cy="16" rx="5" ry="8" stroke="white" stroke-width="1.5"/>
-      <line x1="8" y1="16" x2="24" y2="16" stroke="white" stroke-width="1.5"/>
+    <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <linearGradient id="orbit-logo-core" x1="9" y1="9" x2="23" y2="23" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#ffd27a"/>
+          <stop offset="1" stop-color="#e8650a"/>
+        </linearGradient>
+      </defs>
+      <ellipse cx="16" cy="16" rx="13.4" ry="6.1" transform="rotate(-30 16 16)"
+               stroke="#fff" stroke-opacity=".55" stroke-width="1.6"/>
+      <circle cx="16" cy="16" r="6.1" fill="url(#orbit-logo-core)"/>
+      <circle cx="13.8" cy="13.8" r="1.9" fill="#fff" fill-opacity=".35"/>
+      <circle cx="27.6" cy="9.3" r="2.3" fill="#fff"/>
     </svg>
     <div>
       <div class="logo-text">Orbit</div>
@@ -1354,7 +1396,7 @@ function renderListItem(item, idx) {
       <span class="list-icon">${icon}</span>
       <span class="list-name">${esc(item.name)}</span>
       <span class="list-size">${size}</span>
-      <span class="list-date">${formatDate(item.modified)}</span>
+      <span class="list-date">${formatDateTime(item.modified)}</span>
       <span class="list-type">${badge}</span>
     </div>`;
 }
@@ -1783,8 +1825,16 @@ function formatDate(ts) {
   return new Date(ts * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+// Date + 24-hour HH:MM:SS, used in the list view's Modified column.
+function formatDateTime(ts) {
+  return new Date(ts * 1000).toLocaleString(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  });
+}
+
 function formatDateLong(ts) {
-  return new Date(ts * 1000).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return new Date(ts * 1000).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 }
 
 function metaRow(key, val) {
