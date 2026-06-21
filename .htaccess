@@ -20,6 +20,13 @@ DirectoryIndex index.php index.html
     Require all denied
 </FilesMatch>
 
+# Block the whole .git directory tree (Orbit is commonly deployed via `git clone`,
+# which would otherwise expose .git/ under the web root). FilesMatch above only
+# covers a file literally named ".git", not the directory's contents.
+<IfModule mod_alias.c>
+    RedirectMatch 404 "/\.git(/|$)"
+</IfModule>
+
 # ─── MIME types for scientific/HEP file formats ───────────────────────────────
 <IfModule mod_mime.c>
     AddType application/x-hdf          .h5 .hdf5

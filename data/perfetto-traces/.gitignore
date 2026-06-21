@@ -1,0 +1,5 @@
+# Perfetto traces are dropped into this folder on each deployment, but they are
+# large and host-specific, so they are never committed. Keep the folder in the
+# repo (via this file) and ignore everything else inside it.
+*
+!.gitignore
