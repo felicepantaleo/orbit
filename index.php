@@ -485,6 +485,7 @@ function search_files(string $base_path, string $query, int $max = 200): array
       --radius-lg:    14px;
       --header-h:     58px;
       --toolbar-h:    52px;
+      --footer-h:     46px;
       --transition:   .18s ease;
     }
     [data-theme="dark"] {
@@ -631,7 +632,21 @@ function search_files(string $base_path, string $query, int $max = 200): array
     #stats { margin-left: auto; font-size: .8rem; color: var(--c-text-3); white-space: nowrap; }
 
     /* ── Content layout ───────────────────────────────────────────── */
-    #content-wrap { display: flex; min-height: calc(100vh - var(--header-h) - 40px - var(--toolbar-h)); }
+    #content-wrap { display: flex; min-height: calc(100vh - var(--header-h) - 40px - var(--toolbar-h) - var(--footer-h)); }
+
+    /* ── Footer ───────────────────────────────────────────────────── */
+    #app-footer {
+      min-height: var(--footer-h);
+      display: flex; align-items: center; justify-content: center;
+      gap: 8px; flex-wrap: wrap;
+      padding: 12px 20px;
+      border-top: 1px solid var(--c-border);
+      background: var(--c-surface);
+      color: var(--c-text-3); font-size: .8rem;
+    }
+    #app-footer a { color: var(--c-text-2); text-decoration: none; transition: color var(--transition); }
+    #app-footer a:hover { color: var(--c-primary); }
+    .footer-sep { opacity: .55; }
     #main { flex: 1; padding: 20px; min-width: 0; }
 
     /* ── Loading / Empty / Error states ──────────────────────────── */
@@ -957,7 +972,8 @@ function search_files(string $base_path, string $query, int $max = 200): array
 
 <!-- ── Header ─────────────────────────────────────────────────────────── -->
 <header id="header">
-  <a class="logo" href="?path=/" id="logo-link">
+  <a class="logo" href="https://github.com/felicepantaleo/orbit" id="logo-link"
+     target="_blank" rel="noopener noreferrer" title="Orbit on GitHub">
     <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <defs>
         <linearGradient id="orbit-logo-core" x1="9" y1="9" x2="23" y2="23" gradientUnits="userSpaceOnUse">
@@ -1040,6 +1056,13 @@ function search_files(string $base_path, string $query, int $max = 200): array
     </div>
   </main>
 </div>
+
+<!-- ── Footer ─────────────────────────────────────────────────────────── -->
+<footer id="app-footer">
+  <a href="https://github.com/felicepantaleo/orbit" target="_blank" rel="noopener noreferrer">GitHub</a>
+  <span class="footer-sep">·</span>
+  <span>Felice Pantaleo · CERN</span>
+</footer>
 
 <!-- ── Metadata panel ─────────────────────────────────────────────────── -->
 <aside id="meta-panel" role="complementary" aria-label="File metadata">
@@ -2009,10 +2032,8 @@ document.getElementById('btn-copy-link').addEventListener('click', () => {
   if (item) copyLink(buildFileUrl(item.path));
 });
 
-document.getElementById('logo-link').addEventListener('click', (e) => {
-  e.preventDefault();
-  navigateTo('/');
-});
+// The logo links out to the GitHub repo (new tab); in-app "home" lives in the
+// breadcrumb's 🏠 Home link.
 
 window.addEventListener('popstate', (e) => {
   const path = e.state?.path || getCurrentPathFromURL();
