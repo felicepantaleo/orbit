@@ -1548,47 +1548,21 @@ function previewTrace(item, body) {
         <button class="btn-primary" id="btn-open-perfetto">Open in Perfetto ↗</button>
         <a class="btn-primary" style="background:var(--c-text-2)" href="${buildFileUrl(item.path, true)}" download="${esc(item.name)}">⬇ Download</a>
       </div>
-      <p style="font-size:.78rem; opacity:.7; max-width:440px">Opens <strong>${esc(host)}</strong> in a new tab and streams this trace straight into it — the file is not uploaded anywhere else.</p>
+      <p style="font-size:.78rem; opacity:.7; max-width:440px">Opens <strong>${esc(host)}</strong> in a new tab and loads this trace by its URL — the resulting Perfetto link is shareable.</p>
     </div>`;
   body.querySelector('#btn-open-perfetto').addEventListener('click', () => openInPerfetto(item));
 }
 
-// Hand a trace to a Perfetto UI instance in a new tab using the documented
-// window.open + postMessage handshake (no CORS needed: we fetch the bytes
-// ourselves and pass them as an ArrayBuffer).
+// Open a trace in the Perfetto UI via its deep-link format
+// (`<origin>/#!/?url=<encoded trace URL>`). Perfetto fetches the trace straight
+// from that URL, which yields a shareable/bookmarkable Perfetto tab. The trace
+// must therefore be served with an Access-Control-Allow-Origin header — Orbit's
+// .htaccess sets that for trace files.
 function openInPerfetto(item) {
-  const ORIGIN = CONFIG.perfettoOrigin;
-  const win = window.open(ORIGIN);
-  if (!win) {
-    showToast('Pop-up blocked — allow pop-ups for this site to open Perfetto');
-    return;
-  }
-  showToast('Opening trace in Perfetto…');
-
-  // Start the download right away so it overlaps Perfetto's startup.
-  const tracePromise = fetch(buildFileUrl(item.path))
-    .then(res => { if (!res.ok) throw new Error('HTTP ' + res.status); return res.arrayBuffer(); });
-  tracePromise.catch(() => {}); // avoid an unhandled rejection if Perfetto never replies
-
-  let pinger = null, settled = false;
-  const cleanup = () => {
-    if (pinger) { clearInterval(pinger); pinger = null; }
-    window.removeEventListener('message', onMessage);
-  };
-  const onMessage = (evt) => {
-    if (settled || evt.origin !== ORIGIN || evt.data !== 'PONG') return;
-    settled = true;
-    cleanup();
-    tracePromise
-      .then(buffer => win.postMessage({ perfetto: { buffer, title: item.name } }, ORIGIN))
-      .catch(err => showToast('Could not load trace: ' + err.message));
-  };
-
-  window.addEventListener('message', onMessage);
-  // Perfetto replies 'PONG' once its app is ready; keep pinging until then.
-  pinger = setInterval(() => win.postMessage('PING', ORIGIN), 50);
-  // Give up if the UI never becomes ready (e.g. tab closed) to avoid leaking the timer.
-  setTimeout(() => { if (!settled) cleanup(); }, 30000);
+  const origin   = CONFIG.perfettoOrigin.replace(/\/+$/, '');
+  const traceUrl = absoluteFileUrl(item.path);
+  const deepLink = `${origin}/#!/?url=${encodeURIComponent(traceUrl)}`;
+  window.open(deepLink, '_blank', 'noopener');
 }
 
 async function previewText(item, body, path) {
@@ -1901,6 +1875,15 @@ function buildFileUrl(path, download = false) {
   const params = new URLSearchParams({ action: 'file', path });
   if (download) params.set('download', '1');
   return `?${params.toString()}`;
+}
+
+// Absolute, statically-served URL to a file under the Orbit root (i.e. the
+// directory containing index.php), with each path segment percent-encoded.
+// Used to hand a fetchable URL to external tools such as the Perfetto UI.
+function absoluteFileUrl(path) {
+  const dir = location.pathname.replace(/[^/]*$/, '');   // strip index.php / trailing segment
+  const enc = String(path).replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
+  return location.origin + dir + enc;
 }
 
 function formatSize(bytes) {

@@ -15,7 +15,7 @@ Orbit is a lightweight, self-contained web file browser for **any folder exposed
 | 🎬 **Video / Audio** | HTML5 in-browser playback |
 | 💻 **Text / Code view** | Inline viewer for Python, C++, JavaScript, JSON, CSV, Markdown, LaTeX, and more |
 | 📓 **Jupyter notebooks** | Inline cell-by-cell preview of `.ipynb` files, including embedded figures |
-| ⏱ **Perfetto traces** | Open `.perfetto-trace` / `.pftrace` files in the [Perfetto UI](https://perfetto.web.cern.ch) in a new tab, streamed directly via `postMessage` (no upload, no CORS setup) |
+| ⏱ **Perfetto traces** | Open `.perfetto-trace` / `.pftrace` files in the [Perfetto UI](https://perfetto.web.cern.ch) in a new tab via a shareable `#!/?url=` deep link (trace files are served with `Access-Control-Allow-Origin` so Perfetto can fetch them) |
 | 📊 **CSV preview** | Auto-detected column headers and row preview in a table |
 | 🔬 **EXIF metadata** | Camera make/model, exposure, ISO, focal length, GPS (with map link) for JPEG/TIFF images |
 | 🌙 **Dark mode** | Automatic + manual toggle |

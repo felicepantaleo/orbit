@@ -27,6 +27,20 @@ DirectoryIndex index.php index.html
     RedirectMatch 404 "/\.git(/|$)"
 </IfModule>
 
+# ─── CORS for Perfetto traces ────────────────────────────────────────────────
+# The "Open in Perfetto" button deep-links to the Perfetto UI as
+#   <perfetto-origin>/#!/?url=<this trace's URL>
+# so Perfetto fetches the trace cross-origin. The files are already publicly
+# downloadable, so allow any origin to read them.
+<IfModule mod_headers.c>
+    <FilesMatch "\.(perfetto-trace|perfetto_trace|pftrace|perfetto)$">
+        Header always set Access-Control-Allow-Origin  "*"
+        Header always set Access-Control-Allow-Methods  "GET, HEAD, OPTIONS"
+        Header always set Access-Control-Allow-Headers  "Range"
+        Header always set Access-Control-Expose-Headers "Accept-Ranges, Content-Length, Content-Range"
+    </FilesMatch>
+</IfModule>
+
 # ─── MIME types for scientific/HEP file formats ───────────────────────────────
 <IfModule mod_mime.c>
     AddType application/x-hdf          .h5 .hdf5
@@ -41,6 +55,7 @@ DirectoryIndex index.php index.html
     AddType text/x-tex                 .tex
     AddType application/json           .json
     AddType text/yaml                  .yaml .yml
+    AddType application/octet-stream    .perfetto-trace .perfetto_trace .pftrace .perfetto
 </IfModule>
 
 # ─── Enable compression ───────────────────────────────────────────────────────
