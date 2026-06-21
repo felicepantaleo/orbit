@@ -1,0 +1,23 @@
+{
+  "displayTimeUnit": "ms",
+  "traceEvents": [
+    {"name": "process_name", "ph": "M", "pid": 1, "tid": 0, "args": {"name": "Orbit demo"}},
+    {"name": "thread_name", "ph": "M", "pid": 1, "tid": 1, "args": {"name": "main"}},
+    {"name": "thread_name", "ph": "M", "pid": 1, "tid": 2, "args": {"name": "worker"}},
+
+    {"name": "load_geometry", "cat": "init", "ph": "X", "ts": 0, "dur": 4200, "pid": 1, "tid": 1},
+    {"name": "build_acceleration_structure", "cat": "init", "ph": "X", "ts": 4500, "dur": 3100, "pid": 1, "tid": 1},
+    {"name": "event_loop", "cat": "run", "ph": "X", "ts": 8000, "dur": 12000, "pid": 1, "tid": 1},
+    {"name": "track_seeding", "cat": "run", "ph": "X", "ts": 8200, "dur": 3000, "pid": 1, "tid": 1},
+    {"name": "track_fitting", "cat": "run", "ph": "X", "ts": 11400, "dur": 5200, "pid": 1, "tid": 1},
+    {"name": "vertexing", "cat": "run", "ph": "X", "ts": 16800, "dur": 2900, "pid": 1, "tid": 1},
+
+    {"name": "decode_hits", "cat": "worker", "ph": "X", "ts": 8200, "dur": 2600, "pid": 1, "tid": 2},
+    {"name": "cluster_hits", "cat": "worker", "ph": "X", "ts": 11000, "dur": 4100, "pid": 1, "tid": 2},
+    {"name": "write_output", "cat": "worker", "ph": "X", "ts": 15300, "dur": 3500, "pid": 1, "tid": 2},
+
+    {"name": "events_processed", "ph": "C", "ts": 8000, "pid": 1, "tid": 1, "args": {"count": 0}},
+    {"name": "events_processed", "ph": "C", "ts": 14000, "pid": 1, "tid": 1, "args": {"count": 512}},
+    {"name": "events_processed", "ph": "C", "ts": 20000, "pid": 1, "tid": 1, "args": {"count": 1024}}
+  ]
+}

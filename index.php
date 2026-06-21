@@ -24,6 +24,7 @@ define('TYPE_MAP', [
     'data'     => ['csv','tsv','json','xml','yaml','yml','hdf5','h5','root','parquet',
                    'feather','npy','npz','fits','dat','bin','hepmc'],
     'graph'    => ['dot','gv'],
+    'trace'    => ['perfetto-trace','perfetto_trace','pftrace','perfetto'],
     'document' => ['txt','md','rst','tex','doc','docx','xls','xlsx','ppt','pptx','odt','ods','odp'],
     'archive'  => ['zip','tar','gz','bz2','xz','7z','rar','tgz','tar.gz','tar.bz2'],
     'notebook' => ['ipynb'],
@@ -759,6 +760,7 @@ function search_files(string $base_path, string $query, int $max = 200): array
     .badge-code     { background: #f3e8ff; color: #7e22ce; }
     .badge-data     { background: #fdf2f8; color: #9d174d; }
     .badge-graph    { background: #ecfeff; color: #0e7490; }
+    .badge-trace    { background: #eef2ff; color: #4338ca; }
     .badge-document { background: #eff6ff; color: #1d4ed8; }
     .badge-archive  { background: #fff7ed; color: #c2410c; }
     .badge-notebook { background: #fefce8; color: #854d0e; }
@@ -769,6 +771,7 @@ function search_files(string $base_path, string $query, int $max = 200): array
     [data-theme="dark"] .badge-code     { background: #3b0764; color: #d8b4fe; }
     [data-theme="dark"] .badge-data     { background: #4a044e; color: #f0abfc; }
     [data-theme="dark"] .badge-graph    { background: #083344; color: #67e8f9; }
+    [data-theme="dark"] .badge-trace    { background: #312e81; color: #c7d2fe; }
     [data-theme="dark"] .badge-document { background: #1e3a8a; color: #93c5fd; }
     [data-theme="dark"] .badge-notebook { background: #422006; color: #fde68a; }
     [data-theme="dark"] .badge-archive  { background: #431407; color: #fdba74; }
@@ -1130,6 +1133,7 @@ const CONFIG = {
     'https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js',
     'https://cdn.jsdelivr.net/npm/d3-graphviz@5/build/d3-graphviz.js',
   ],
+  perfettoOrigin: 'https://perfetto.web.cern.ch',  // Perfetto UI for opening .perfetto-trace/.pftrace files
 };
 
 const FILTERS = [
@@ -1141,6 +1145,7 @@ const FILTERS = [
   { id: 'audio',     label: '🎵 Audio',      types: ['audio'] },
   { id: 'data',      label: '📊 Data',       types: ['data'] },
   { id: 'graph',     label: '📈 Graphs',     types: ['graph'] },
+  { id: 'trace',     label: '⏱ Traces',     types: ['trace'] },
   { id: 'code',      label: '💻 Code',       types: ['code'] },
   { id: 'notebook',  label: '📓 Notebooks',  types: ['notebook'] },
   { id: 'document',  label: '📝 Documents',  types: ['document'] },
@@ -1149,7 +1154,7 @@ const FILTERS = [
 
 const FILE_ICONS = {
   directory: '📁', image: '🖼', pdf: '📄', video: '🎬', audio: '🎵',
-  code: '💻', data: '📊', graph: '📈', document: '📝', archive: '📦', notebook: '📓',
+  code: '💻', data: '📊', graph: '📈', trace: '⏱', document: '📝', archive: '📦', notebook: '📓',
   other: '📄',
 };
 
@@ -1509,6 +1514,11 @@ async function renderPreviewContent(item, body) {
     return;
   }
 
+  if (item.type === 'trace') {
+    previewTrace(item, body);
+    return;
+  }
+
   if (CONFIG.previewText.includes(item.extension)) {
     await previewText(item, body, path);
     return;
@@ -1522,6 +1532,63 @@ async function renderPreviewContent(item, body) {
       <p>No preview available for <strong>.${item.extension}</strong></p>
       <a class="btn-primary" href="${buildFileUrl(item.path, true)}" download="${esc(item.name)}">⬇ Download</a>
     </div>`;
+}
+
+// ── Perfetto trace preview ──────────────────────────────────────────────────
+function previewTrace(item, body) {
+  let host = CONFIG.perfettoOrigin;
+  try { host = new URL(CONFIG.perfettoOrigin).host; } catch (e) { /* keep raw */ }
+  body.innerHTML = `
+    <div class="state-box" style="color:#aaa">
+      <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+        <path d="M3 3v18h18"/><path d="M7 15l3-4 3 2 4-6"/>
+      </svg>
+      <p>Perfetto trace — <strong>${esc(item.name)}</strong></p>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-top:4px">
+        <button class="btn-primary" id="btn-open-perfetto">Open in Perfetto ↗</button>
+        <a class="btn-primary" style="background:var(--c-text-2)" href="${buildFileUrl(item.path, true)}" download="${esc(item.name)}">⬇ Download</a>
+      </div>
+      <p style="font-size:.78rem; opacity:.7; max-width:440px">Opens <strong>${esc(host)}</strong> in a new tab and streams this trace straight into it — the file is not uploaded anywhere else.</p>
+    </div>`;
+  body.querySelector('#btn-open-perfetto').addEventListener('click', () => openInPerfetto(item));
+}
+
+// Hand a trace to a Perfetto UI instance in a new tab using the documented
+// window.open + postMessage handshake (no CORS needed: we fetch the bytes
+// ourselves and pass them as an ArrayBuffer).
+function openInPerfetto(item) {
+  const ORIGIN = CONFIG.perfettoOrigin;
+  const win = window.open(ORIGIN);
+  if (!win) {
+    showToast('Pop-up blocked — allow pop-ups for this site to open Perfetto');
+    return;
+  }
+  showToast('Opening trace in Perfetto…');
+
+  // Start the download right away so it overlaps Perfetto's startup.
+  const tracePromise = fetch(buildFileUrl(item.path))
+    .then(res => { if (!res.ok) throw new Error('HTTP ' + res.status); return res.arrayBuffer(); });
+  tracePromise.catch(() => {}); // avoid an unhandled rejection if Perfetto never replies
+
+  let pinger = null, settled = false;
+  const cleanup = () => {
+    if (pinger) { clearInterval(pinger); pinger = null; }
+    window.removeEventListener('message', onMessage);
+  };
+  const onMessage = (evt) => {
+    if (settled || evt.origin !== ORIGIN || evt.data !== 'PONG') return;
+    settled = true;
+    cleanup();
+    tracePromise
+      .then(buffer => win.postMessage({ perfetto: { buffer, title: item.name } }, ORIGIN))
+      .catch(err => showToast('Could not load trace: ' + err.message));
+  };
+
+  window.addEventListener('message', onMessage);
+  // Perfetto replies 'PONG' once its app is ready; keep pinging until then.
+  pinger = setInterval(() => win.postMessage('PING', ORIGIN), 50);
+  // Give up if the UI never becomes ready (e.g. tab closed) to avoid leaking the timer.
+  setTimeout(() => { if (!settled) cleanup(); }, 30000);
 }
 
 async function previewText(item, body, path) {

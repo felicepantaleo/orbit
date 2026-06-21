@@ -15,6 +15,7 @@ Orbit is a lightweight, self-contained web file browser for **any folder exposed
 | 🎬 **Video / Audio** | HTML5 in-browser playback |
 | 💻 **Text / Code view** | Inline viewer for Python, C++, JavaScript, JSON, CSV, Markdown, LaTeX, and more |
 | 📓 **Jupyter notebooks** | Inline cell-by-cell preview of `.ipynb` files, including embedded figures |
+| ⏱ **Perfetto traces** | Open `.perfetto-trace` / `.pftrace` files in the [Perfetto UI](https://perfetto.web.cern.ch) in a new tab, streamed directly via `postMessage` (no upload, no CORS setup) |
 | 📊 **CSV preview** | Auto-detected column headers and row preview in a table |
 | 🔬 **EXIF metadata** | Camera make/model, exposure, ISO, focal length, GPS (with map link) for JPEG/TIFF images |
 | 🌙 **Dark mode** | Automatic + manual toggle |
@@ -24,7 +25,9 @@ Orbit is a lightweight, self-contained web file browser for **any folder exposed
 | 📱 **Responsive** | Works on desktop, tablet, and mobile |
 
 ### File type recognition
-Images, PDFs, videos, audio, text/code, CSV, notebooks, archives, documents, and scientific formats such as `ROOT`, `HDF5`, `FITS`, `Parquet`, `NumPy`, and `HepMC`.
+Images, PDFs, videos, audio, text/code, CSV, notebooks, archives, documents, Perfetto traces, and scientific formats such as `ROOT`, `HDF5`, `FITS`, `Parquet`, `NumPy`, and `HepMC`.
+
+> **Perfetto UI endpoint** — the "Open in Perfetto" target is set by `perfettoOrigin` in the `CONFIG` object in `index.php` (defaults to `https://perfetto.web.cern.ch`).
 
 ---
 
