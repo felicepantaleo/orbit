@@ -791,10 +791,10 @@ function search_files(string $base_path, string $query, int $max = 200): array
     #preview-header {
       display: flex; align-items: center; gap: 12px;
       padding: 12px 20px; background: rgba(0,0,0,.5);
-      flex-shrink: 0;
+      flex-shrink: 0; flex-wrap: wrap;
     }
-    #preview-title { color: #fff; font-size: .95rem; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    #preview-actions { display: flex; gap: 8px; }
+    #preview-title { color: #fff; font-size: .95rem; font-weight: 600; flex: 1; min-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #preview-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
     .prev-btn {
       background: rgba(255,255,255,.12); border: none;
       color: #fff; cursor: pointer; border-radius: var(--radius);
@@ -1090,11 +1090,17 @@ function search_files(string $base_path, string $query, int $max = 200): array
         </svg>
         Info
       </button>
-      <button class="prev-btn" id="btn-copy-link" title="Copy link">
+      <button class="prev-btn" id="btn-copy-deep" title="Copy a link that opens this file in Orbit">
         <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
           <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z"/><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z"/>
         </svg>
-        Copy link
+        Deep link
+      </button>
+      <button class="prev-btn" id="btn-copy-direct" title="Copy a direct link to the raw file">
+        <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z"/><path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z"/>
+        </svg>
+        Direct link
       </button>
       <a class="prev-btn" id="btn-download" href="#" download title="Download">
         <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
@@ -1211,6 +1217,20 @@ function getCurrentPathFromURL() {
 function pushState(path) {
   const url = path === '/' ? '?' : `?path=${encodeURIComponent(path)}`;
   history.pushState({ path }, '', url);
+}
+
+// Resolve a ?preview=/folder/file deep link: load the containing folder, then
+// open that file's preview. Leaves the deep-link URL in the address bar so it
+// stays shareable.
+async function openDeepLinkPreview(filePath) {
+  const folder = filePath.replace(/\/[^/]*$/, '') || '/';
+  await navigateTo(folder, false);
+  const idx = state.filtered.findIndex(i => i.path === filePath && !i.is_dir);
+  if (idx >= 0) {
+    openPreview(idx);
+  } else {
+    showToast('Linked file not found');
+  }
 }
 
 async function navigateTo(path, pushHistory = true) {
@@ -1768,9 +1788,10 @@ async function showMetaPanel(item) {
       ${metaRow('Type', m.type)}
       ${metaRow('MIME', m.mime_type)}
       ${m.extension ? metaRow('Extension', '.' + m.extension) : ''}
-      <div class="meta-row" style="margin-top:8px">
+      <div class="meta-row" style="margin-top:8px;flex-wrap:wrap;gap:6px">
         <a class="btn-primary" href="${buildFileUrl(item.path, true)}" download="${esc(item.name)}" style="font-size:.78rem;padding:5px 12px">⬇ Download</a>
-        <button class="btn-primary" onclick="copyLink('${window.location.pathname}${buildFileUrl(item.path)}')" style="font-size:.78rem;padding:5px 12px;background:var(--c-surface-2);color:var(--c-text)">🔗 Copy link</button>
+        <button class="btn-primary" onclick="copyDeepLink('${escJsAttr(item.path)}')" title="Copy a link that opens this file in Orbit" style="font-size:.78rem;padding:5px 12px;background:var(--c-surface-2);color:var(--c-text)">🔗 Deep link</button>
+        <button class="btn-primary" onclick="copyDirectLink('${escJsAttr(item.path)}')" title="Copy a direct link to the raw file" style="font-size:.78rem;padding:5px 12px;background:var(--c-surface-2);color:var(--c-text)">↗ Direct link</button>
       </div>
     </div>`;
 
@@ -1871,20 +1892,46 @@ function esc(str) {
   return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// Escape a string for a single-quoted JS literal sitting inside a double-quoted
+// HTML attribute, e.g. onclick="fn('...')" — handles backslashes, quotes (JS),
+// and HTML-special chars so filenames with ' or " can't break out.
+function escJsAttr(str) {
+  return String(str ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;');
+}
+
 function buildFileUrl(path, download = false) {
   const params = new URLSearchParams({ action: 'file', path });
   if (download) params.set('download', '1');
   return `?${params.toString()}`;
 }
 
-// Absolute, statically-served URL to a file under the Orbit root (i.e. the
-// directory containing index.php), with each path segment percent-encoded.
-// Used to hand a fetchable URL to external tools such as the Perfetto UI.
-function absoluteFileUrl(path) {
-  const dir = location.pathname.replace(/[^/]*$/, '');   // strip index.php / trailing segment
-  const enc = String(path).replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
-  return location.origin + dir + enc;
+// Absolute URL of the Orbit root (the directory containing index.php), e.g.
+// https://host/felice/orbit/ — works whether the page was loaded as the
+// directory index or as .../index.php, and regardless of any ?path query.
+function orbitBaseUrl() {
+  return location.origin + location.pathname.replace(/[^/]*$/, '');
 }
+
+// Absolute, statically-served URL straight to a file's raw bytes, with each
+// path segment percent-encoded. Used for the "Direct link" button and for
+// handing a fetchable URL to external tools such as the Perfetto UI.
+function absoluteFileUrl(path) {
+  const enc = String(path).replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
+  return orbitBaseUrl() + enc;
+}
+
+// Absolute Orbit "deep link": opens Orbit and auto-opens this file's preview.
+function deepLinkUrl(path) {
+  return orbitBaseUrl() + '?preview=' + encodeURIComponent(path);
+}
+
+function copyDeepLink(path)   { copyLink(deepLinkUrl(path)); }
+function copyDirectLink(path) { copyLink(absoluteFileUrl(path)); }
 
 function formatSize(bytes) {
   if (bytes === null || bytes === undefined) return '—';
@@ -1952,7 +1999,7 @@ function showToast(msg) {
 }
 
 function copyLink(url) {
-  const abs = new URL(url, window.location.origin).href;
+  const abs = new URL(url, window.location.href).href;
   navigator.clipboard.writeText(abs).then(() => showToast('Link copied!')).catch(() => showToast('Could not copy link'));
 }
 
@@ -2077,9 +2124,14 @@ document.getElementById('btn-preview-meta').addEventListener('click', () => {
   if (item) { closePreview(); showMetaPanel(item); }
 });
 
-document.getElementById('btn-copy-link').addEventListener('click', () => {
+document.getElementById('btn-copy-deep').addEventListener('click', () => {
   const item = state.filtered[state.previewIndex];
-  if (item) copyLink(buildFileUrl(item.path));
+  if (item) copyDeepLink(item.path);
+});
+
+document.getElementById('btn-copy-direct').addEventListener('click', () => {
+  const item = state.filtered[state.previewIndex];
+  if (item) copyDirectLink(item.path);
 });
 
 // The logo links out to the GitHub repo (new tab); in-app "home" lives in the
@@ -2091,8 +2143,10 @@ window.addEventListener('popstate', (e) => {
 });
 
 // expose for inline handlers
-window.openPreview   = openPreview;
-window.copyLink      = copyLink;
+window.openPreview    = openPreview;
+window.copyLink       = copyLink;
+window.copyDeepLink   = copyDeepLink;
+window.copyDirectLink = copyDirectLink;
 
 // ═══════════════════════════════════════════════════════════════
 // INIT
@@ -2100,8 +2154,14 @@ window.copyLink      = copyLink;
 initDarkMode();
 renderFilterChips();
 
-const initPath = getCurrentPathFromURL();
-navigateTo(initPath, false);
+// Deep link (?preview=/path/to/file): open the folder, then that file's preview.
+// Otherwise just open the requested folder (?path=… or root).
+const previewParam = new URLSearchParams(window.location.search).get('preview');
+if (previewParam) {
+  openDeepLinkPreview(previewParam);
+} else {
+  navigateTo(getCurrentPathFromURL(), false);
+}
 </script>
 </body>
 </html>
