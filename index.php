@@ -1102,6 +1102,12 @@ function search_files(string $base_path, string $query, int $max = 200): array
         </svg>
         Direct link
       </button>
+      <a class="prev-btn" id="btn-open-raw" href="#" target="_blank" rel="noopener" title="Open the raw file in a new tab">
+        <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M3 5a2 2 0 012-2h4a1 1 0 010 2H5v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H5a2 2 0 01-2-2V5z"/><path d="M13 3a1 1 0 000 2h1.586l-5.293 5.293a1 1 0 101.414 1.414L16 6.414V8a1 1 0 102 0V4a1 1 0 00-1-1h-4z"/>
+        </svg>
+        Open raw
+      </a>
       <a class="prev-btn" id="btn-download" href="#" download title="Download">
         <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
           <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/>
@@ -1483,6 +1489,7 @@ function openPreview(idx) {
   const dl = document.getElementById('btn-download');
   dl.href = buildFileUrl(item.path, true);
   dl.download = item.name;
+  document.getElementById('btn-open-raw').href = absoluteFileUrl(item.path);
 
   const body = document.getElementById('preview-body');
   body.innerHTML = '<div class="state-box"><div class="spinner"></div><p>Loading preview…</p></div>';
@@ -1792,6 +1799,7 @@ async function showMetaPanel(item) {
         <a class="btn-primary" href="${buildFileUrl(item.path, true)}" download="${esc(item.name)}" style="font-size:.78rem;padding:5px 12px">⬇ Download</a>
         <button class="btn-primary" onclick="copyDeepLink('${escJsAttr(item.path)}')" title="Copy a link that opens this file in Orbit" style="font-size:.78rem;padding:5px 12px;background:var(--c-surface-2);color:var(--c-text)">🔗 Deep link</button>
         <button class="btn-primary" onclick="copyDirectLink('${escJsAttr(item.path)}')" title="Copy a direct link to the raw file" style="font-size:.78rem;padding:5px 12px;background:var(--c-surface-2);color:var(--c-text)">↗ Direct link</button>
+        <a class="btn-primary" href="${esc(absoluteFileUrl(item.path))}" target="_blank" rel="noopener" title="Open the raw file in a new tab" style="font-size:.78rem;padding:5px 12px;background:var(--c-surface-2);color:var(--c-text)">⧉ Open raw</a>
       </div>
     </div>`;
 
