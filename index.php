@@ -245,6 +245,24 @@ function get_file_type(string $ext): string
     return 'other';
 }
 
+// ─── FILE TIMESTAMPS ─────────────────────────────────────────────────────────
+//
+// PHP's stat() exposes mtime (last modification) and ctime (inode-change time)
+// but NOT the file's birth/creation time — that lives only in statx(2), which
+// PHP does not surface. Many filesystems don't record it at all: notably CERN
+// EOS (fuse) returns 0. So we shell out to `stat -c %W` as a best effort and
+// return null whenever a real creation time isn't available.
+function orbit_birthtime(string $full_path): ?int
+{
+    if (!function_exists('exec')) return null;
+    $out = [];
+    $rc  = null;
+    @exec('stat -c %W ' . escapeshellarg($full_path) . ' 2>/dev/null', $out, $rc);
+    if ($rc !== 0 || empty($out)) return null;
+    $ts = (int)trim((string)$out[0]);
+    return $ts > 0 ? $ts : null;
+}
+
 // ─── FILE METADATA & EXIF ───────────────────────────────────────────────────
 
 function get_file_metadata(string $full_path): array
@@ -266,6 +284,8 @@ function get_file_metadata(string $full_path): array
         'path'      => str_replace(BASE_DIR, '', $full_path),
         'size'      => (int)$stat['size'],
         'modified'  => (int)$stat['mtime'],
+        'changed'   => (int)$stat['ctime'],
+        'created'   => orbit_birthtime($full_path),
         'type'      => get_file_type($ext),
         'extension' => $ext,
         'mime_type' => $mime,
@@ -1791,7 +1811,9 @@ async function showMetaPanel(item) {
     html += `<div class="meta-section"><h4>General</h4>
       ${metaRow('Name', m.name)}
       ${metaRow('Size', formatSize(m.size))}
+      ${metaRow('Created', m.created ? formatDateLong(m.created) : null)}
       ${metaRow('Modified', formatDateLong(m.modified))}
+      ${m.changed ? `<div class="meta-row" title="Inode change time — when the file was last added, moved, or had its metadata/permissions changed on the server. On CERN EOS this is the closest available proxy for when the file first appeared."><span class="meta-key">Changed</span><span class="meta-val">${esc(formatDateLong(m.changed))}</span></div>` : ''}
       ${metaRow('Type', m.type)}
       ${metaRow('MIME', m.mime_type)}
       ${m.extension ? metaRow('Extension', '.' + m.extension) : ''}
