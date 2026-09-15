@@ -35,6 +35,14 @@ define('TYPE_MAP', [
 if (isset($_GET['action'])) {
     header('X-Content-Type-Options: nosniff');
     header('X-Frame-Options: SAMEORIGIN');
+    // Directory data and file previews must reflect files that may have been
+    // overwritten in place.  In particular, browsers otherwise tend to reuse
+    // image responses because the preview URL has not changed.
+    if ($_GET['action'] !== 'favicon') {
+        header('Cache-Control: no-store, max-age=0');
+        header('Pragma: no-cache');
+        header('Expires: 0');
+    }
 
     try {
         switch ($_GET['action']) {
@@ -727,7 +735,10 @@ function search_files(string $base_path, string $query, int $max = 200): array
       word-break: break-word; line-height: 1.3;
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
     }
-    .card-meta { font-size: .72rem; color: var(--c-text-3); margin-top: 4px; }
+    .card-meta {
+      display: grid; gap: 2px; margin-top: 5px;
+      font-size: .72rem; line-height: 1.35; color: var(--c-text-3);
+    }
 
     /* ── List view ────────────────────────────────────────────────── */
     #file-list { display: flex; flex-direction: column; gap: 2px; }
@@ -843,6 +854,7 @@ function search_files(string $base_path, string $query, int $max = 200): array
       border-radius: var(--radius);
       box-shadow: 0 8px 40px rgba(0,0,0,.6);
       cursor: zoom-in; user-select: none;
+      touch-action: pan-y pinch-zoom;
       transition: transform .2s ease;
     }
     #preview-img.zoomed { cursor: zoom-out; transform: scale(1.8); }
@@ -984,7 +996,7 @@ function search_files(string $base_path, string $query, int $max = 200): array
       .list-item, .list-header { grid-template-columns: 32px 1fr; }
       .list-date,
       .list-header span[data-sort-field="date"] { display: none; }
-      #file-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+      #file-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
     }
     @media (max-width: 420px) {
       #header-search-wrap { display: none; }
@@ -1453,7 +1465,10 @@ function renderGridCard(item, idx) {
       <div class="card-thumb">${thumb}</div>
       <div class="card-info">
         <div class="card-name">${esc(item.name)}</div>
-        <div class="card-meta">${size} · ${formatDate(item.modified)}</div>
+        <div class="card-meta">
+          <span>${size}</span>
+          <span title="Last modified">Modified ${formatDateTime(item.modified)}</span>
+        </div>
       </div>
     </div>`;
 }
@@ -1499,6 +1514,9 @@ function lazyLoadImages() {
 // ═══════════════════════════════════════════════════════════════
 // PREVIEW
 // ═══════════════════════════════════════════════════════════════
+let imageSwipe = null;
+let suppressPreviewClickUntil = 0;
+
 function openPreview(idx) {
   const item = state.filtered[idx];
   if (!item || item.is_dir) return;
@@ -1526,7 +1544,14 @@ async function renderPreviewContent(item, body) {
   if (item.is_image) {
     body.innerHTML = `<img id="preview-img" src="${path}" alt="${esc(item.name)}" />`;
     const img = body.querySelector('#preview-img');
-    img.addEventListener('click', () => img.classList.toggle('zoomed'));
+    img.addEventListener('click', (event) => {
+      if (Date.now() < suppressPreviewClickUntil) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      img.classList.toggle('zoomed');
+    });
     img.addEventListener('error', () => { body.innerHTML = errorBox('Could not load image'); });
     return;
   }
@@ -1766,22 +1791,90 @@ function closePreview() {
 }
 
 function navigatePreview(delta) {
-  const newIdx = state.previewIndex + delta;
-  if (newIdx < 0 || newIdx >= state.filtered.length) return;
-  const item = state.filtered[newIdx];
-  if (item.is_dir) return;
-  openPreview(newIdx);
+  const current = state.filtered[state.previewIndex];
+  if (!current || !delta) return;
+
+  // While looking at an image, navigation behaves as a gallery and skips
+  // folders and non-image files. Other preview types retain file-by-file
+  // navigation while skipping folders.
+  const isCandidate = current.is_image
+    ? item => item.is_image
+    : item => !item.is_dir;
+
+  for (let idx = state.previewIndex + delta;
+       idx >= 0 && idx < state.filtered.length;
+       idx += delta) {
+    if (isCandidate(state.filtered[idx])) {
+      openPreview(idx);
+      return;
+    }
+  }
 }
 
 function updateNavArrows() {
   const prev = document.getElementById('nav-prev');
   const next = document.getElementById('nav-next');
   const idx  = state.previewIndex;
-  // look for previous / next non-directory
-  const hasPrev = state.filtered.slice(0, idx).some(i => !i.is_dir);
-  const hasNext = state.filtered.slice(idx + 1).some(i => !i.is_dir);
+  const current = state.filtered[idx];
+  const isCandidate = current?.is_image
+    ? item => item.is_image
+    : item => !item.is_dir;
+  const hasPrev = state.filtered.slice(0, idx).some(isCandidate);
+  const hasNext = state.filtered.slice(idx + 1).some(isCandidate);
   prev.classList.toggle('hidden', !hasPrev);
   next.classList.toggle('hidden', !hasNext);
+}
+
+// Swipe horizontally on touch devices to move through images in the current
+// filtered/sorted folder view. Vertical movement and pinch zoom remain native.
+function beginImageSwipe(event) {
+  const item = state.filtered[state.previewIndex];
+  const img = document.getElementById('preview-img');
+  if (!item?.is_image || !img || img.classList.contains('zoomed') || event.touches.length !== 1) {
+    cancelImageSwipe();
+    return;
+  }
+
+  const touch = event.touches[0];
+  imageSwipe = { startX: touch.clientX, startY: touch.clientY, dx: 0, dy: 0, img };
+}
+
+function moveImageSwipe(event) {
+  if (!imageSwipe || event.touches.length !== 1) return;
+  const touch = event.touches[0];
+  imageSwipe.dx = touch.clientX - imageSwipe.startX;
+  imageSwipe.dy = touch.clientY - imageSwipe.startY;
+
+  if (Math.abs(imageSwipe.dx) <= Math.abs(imageSwipe.dy)) return;
+  event.preventDefault();
+  imageSwipe.img.style.transition = 'none';
+  imageSwipe.img.style.transform = `translateX(${imageSwipe.dx * 0.45}px)`;
+  imageSwipe.img.style.opacity = String(Math.max(0.55, 1 - Math.abs(imageSwipe.dx) / 600));
+}
+
+function endImageSwipe() {
+  if (!imageSwipe) return;
+  const { dx, dy, img } = imageSwipe;
+  imageSwipe = null;
+
+  img.style.transition = '';
+  img.style.transform = '';
+  img.style.opacity = '';
+
+  const threshold = Math.min(90, Math.max(50, window.innerWidth * 0.14));
+  if (Math.abs(dx) >= threshold && Math.abs(dx) > Math.abs(dy) * 1.2) {
+    suppressPreviewClickUntil = Date.now() + 450;
+    navigatePreview(dx < 0 ? 1 : -1);
+  }
+}
+
+function cancelImageSwipe() {
+  if (!imageSwipe) return;
+  const { img } = imageSwipe;
+  imageSwipe = null;
+  img.style.transition = '';
+  img.style.transform = '';
+  img.style.opacity = '';
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1971,11 +2064,7 @@ function formatSize(bytes) {
   return (bytes / 1073741824).toFixed(2) + ' GB';
 }
 
-function formatDate(ts) {
-  return new Date(ts * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-}
-
-// Date + 24-hour HH:MM:SS, used in the list view's Modified column.
+// Date + 24-hour HH:MM:SS, used by grid cards and the list view.
 function formatDateTime(ts) {
   return new Date(ts * 1000).toLocaleString(undefined, {
     year: 'numeric', month: 'short', day: 'numeric',
@@ -2114,11 +2203,17 @@ function setDark(on) {
 document.getElementById('btn-dark').addEventListener('click', () => setDark(!state.darkMode));
 document.getElementById('preview-close').addEventListener('click', closePreview);
 document.getElementById('preview-overlay').addEventListener('click', (e) => {
+  if (Date.now() < suppressPreviewClickUntil) return;
   if (e.target === document.getElementById('preview-overlay') ||
       e.target === document.getElementById('preview-body')) closePreview();
 });
 document.getElementById('nav-prev').addEventListener('click', () => navigatePreview(-1));
 document.getElementById('nav-next').addEventListener('click', () => navigatePreview(1));
+const previewBody = document.getElementById('preview-body');
+previewBody.addEventListener('touchstart', beginImageSwipe, { passive: true });
+previewBody.addEventListener('touchmove', moveImageSwipe, { passive: false });
+previewBody.addEventListener('touchend', endImageSwipe, { passive: true });
+previewBody.addEventListener('touchcancel', cancelImageSwipe, { passive: true });
 
 document.getElementById('btn-grid').addEventListener('click', () => {
   state.view = 'grid';
