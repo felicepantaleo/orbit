@@ -639,6 +639,8 @@ function search_files(string $base_path, string $query, int $max = 200): array
     .view-btn.active, .view-btn:hover {
       background: var(--c-primary); color: #fff; border-color: var(--c-primary);
     }
+    .view-btn:disabled, .prev-btn:disabled { cursor: wait; opacity: .65; }
+    .refresh-control.refreshing svg { animation: spin .7s linear infinite; }
 
     /* filter chips */
     .filter-chip {
@@ -1076,6 +1078,11 @@ function search_files(string $base_path, string $query, int $max = 200): array
         <rect x="1" y="12" width="14" height="2" rx="1"/>
       </svg>
     </button>
+    <button class="view-btn refresh-control" id="btn-refresh" title="Refresh folder and previews" aria-label="Refresh folder and previews">
+      <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+        <path fill-rule="evenodd" d="M15.312 4.688A7.5 7.5 0 103.1 12.9a1 1 0 101.84-.78 5.5 5.5 0 119.03 1.85H12a1 1 0 100 2h4.5a1 1 0 001-1V10.5a1 1 0 10-2 0v2.02A7.5 7.5 0 0015.312 4.688z" clip-rule="evenodd"/>
+      </svg>
+    </button>
   </div>
   <span id="stats"></span>
 </div>
@@ -1116,6 +1123,12 @@ function search_files(string $base_path, string $query, int $max = 200): array
   <div id="preview-header">
     <span id="preview-title"></span>
     <div id="preview-actions">
+      <button class="prev-btn refresh-control" id="btn-preview-refresh" title="Reload this file and folder">
+        <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path fill-rule="evenodd" d="M15.312 4.688A7.5 7.5 0 103.1 12.9a1 1 0 101.84-.78 5.5 5.5 0 119.03 1.85H12a1 1 0 100 2h4.5a1 1 0 001-1V10.5a1 1 0 10-2 0v2.02A7.5 7.5 0 0015.312 4.688z" clip-rule="evenodd"/>
+        </svg>
+        Refresh
+      </button>
       <button class="prev-btn" id="btn-preview-meta" title="Show metadata">
         <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
           <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
@@ -1217,6 +1230,7 @@ const state = {
   previewIndex:   -1,            // index into filtered array
   metaPanelOpen:  false,
   darkMode:       false,
+  contentRevision: Date.now(),   // changes when refresh is forced
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -1224,7 +1238,7 @@ const state = {
 // ═══════════════════════════════════════════════════════════════
 async function apiFetch(params) {
   const url = '?' + new URLSearchParams(params).toString();
-  const res  = await fetch(url);
+  const res  = await fetch(url, { cache: 'no-store' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
   if (!data.success && data.error) throw new Error(data.error);
@@ -1291,6 +1305,69 @@ async function navigateTo(path, pushHistory = true) {
     updateStats();
   } catch (err) {
     showError(err.message);
+  }
+}
+
+let refreshInProgress = false;
+
+async function refreshContent() {
+  if (refreshInProgress) return;
+  refreshInProgress = true;
+
+  const overlay = document.getElementById('preview-overlay');
+  const previewWasOpen = overlay.classList.contains('open');
+  const previewPath = previewWasOpen
+    ? state.filtered[state.previewIndex]?.path
+    : null;
+  const buttons = document.querySelectorAll('.refresh-control');
+  buttons.forEach(button => {
+    button.disabled = true;
+    button.classList.add('refreshing');
+  });
+
+  // Changing the query token guarantees that every thumbnail and preview gets
+  // a new URL, even in front of a proxy that ignores no-store response headers.
+  state.contentRevision = Date.now();
+
+  try {
+    const data = await loadDirectory(state.path);
+    state.items = data.items;
+
+    if (state.isSearching && state.searchQuery) {
+      const searchData = await doSearch(state.path, state.searchQuery);
+      state.filtered = searchData.items;
+      if (searchData.truncated) {
+        showToast(`Showing first 200 results for "${esc(state.searchQuery)}"`);
+      }
+      renderFiles();
+      updateStats();
+    } else {
+      applyFiltersAndSort();
+    }
+
+    renderBreadcrumb(data.path, data.parent);
+    renderFilterChips();
+
+    if (previewPath) {
+      const refreshedIndex = state.filtered.findIndex(item => item.path === previewPath && !item.is_dir);
+      if (refreshedIndex >= 0) {
+        openPreview(refreshedIndex);
+      } else {
+        closePreview();
+        showToast('The previewed file is no longer available');
+        return;
+      }
+    }
+
+    showToast(previewWasOpen ? 'Preview and folder refreshed' : 'Folder refreshed');
+  } catch (error) {
+    showToast(`Refresh failed: ${error.message}`);
+  } finally {
+    refreshInProgress = false;
+    buttons.forEach(button => {
+      button.disabled = false;
+      button.classList.remove('refreshing');
+    });
   }
 }
 
@@ -2030,6 +2107,7 @@ function escJsAttr(str) {
 function buildFileUrl(path, download = false) {
   const params = new URLSearchParams({ action: 'file', path });
   if (download) params.set('download', '1');
+  else params.set('v', String(state.contentRevision));
   return `?${params.toString()}`;
 }
 
@@ -2201,6 +2279,8 @@ function setDark(on) {
 // EVENT WIRING
 // ═══════════════════════════════════════════════════════════════
 document.getElementById('btn-dark').addEventListener('click', () => setDark(!state.darkMode));
+document.getElementById('btn-refresh').addEventListener('click', refreshContent);
+document.getElementById('btn-preview-refresh').addEventListener('click', refreshContent);
 document.getElementById('preview-close').addEventListener('click', closePreview);
 document.getElementById('preview-overlay').addEventListener('click', (e) => {
   if (Date.now() < suppressPreviewClickUntil) return;

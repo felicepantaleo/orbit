@@ -8,6 +8,7 @@ Orbit is a lightweight, self-contained web file browser for **any folder exposed
 |---------|-------------|
 | 📁 **Folder navigation** | Click-through directory tree with breadcrumb |
 | 🔍 **Search** | Real-time search across the current directory and all sub-folders |
+| 🔄 **Forced refresh** | Reload folder metadata, thumbnails, and the open preview without relying on browser caches |
 | 🗂 **Type filters** | One-click filter by Images, PDFs, Videos, Audio, Data, Code, Notebooks, Documents, Archives |
 | ↕️ **Sorting** | Sort by name, date (newest/oldest), size, or file type |
 | 🖼 **Image preview** | Inline lightbox with zoom, keyboard navigation, phone swipe gestures, and image streaming through PHP |
@@ -90,4 +91,3 @@ The `action=file` endpoint ensures previews and downloads work reliably even whe
 Edit the `CONFIG` object in `index.php` to change defaults such as the initial view, previewable text extensions, and lazy-loading threshold.
 
 To rename the app again, update the `<title>`, header logo text, and subtitle in `index.php`.
-
