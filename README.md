@@ -14,7 +14,8 @@ Orbit is a lightweight, self-contained web file browser for **any folder exposed
 | 🖼 **Image preview** | Inline lightbox with zoom, keyboard navigation, phone swipe gestures, and image streaming through PHP |
 | 📄 **PDF preview** | Embedded PDF viewer using the browser's native renderer |
 | 🎬 **Video / Audio** | HTML5 in-browser playback |
-| 💻 **Text / Code view** | Inline viewer for Python, C++, JavaScript, JSON, CSV, Markdown, LaTeX, and more |
+| 💻 **Text / Code view** | Inline viewer for logs (`.log`, `.out`, `.err`, `.stdout`, `.stderr`), Python, C++, CUDA, shell, JSON, YAML, Markdown, LaTeX, and more. A file with an unknown or no extension (for example `Makefile`) shows as text when its first 4 KB contain no NUL byte. A file larger than 512 KB shows a 512 KB window: logs open at the end, other files at the start, and the **Start** / **End** buttons switch the window. **Wrap** toggles line wrapping. |
+| 🌳 **ROOT files** | `.root` files open in an embedded [JSROOT](https://root.cern/js/) browser: click an object in the tree to draw it. JSROOT reads only the bytes it needs with HTTP range requests. **Open in new tab** opens the same viewer at a shareable `?action=jsroot&path=…` URL. |
 | 📓 **Jupyter notebooks** | Inline cell-by-cell preview of `.ipynb` files, including embedded figures |
 | ⏱ **Perfetto traces** | Open `.perfetto-trace` / `.pftrace` files in the [Perfetto UI](https://perfetto.web.cern.ch) in a new tab via a shareable `#!/?url=` deep link (trace files are served with `Access-Control-Allow-Origin` so Perfetto can fetch them) |
 | 📊 **CSV preview** | Auto-detected column headers and row preview in a table |
@@ -27,6 +28,8 @@ Orbit is a lightweight, self-contained web file browser for **any folder exposed
 
 ### File type recognition
 Images, PDFs, videos, audio, text/code, CSV, notebooks, archives, documents, Perfetto traces, and scientific formats such as `ROOT`, `HDF5`, `FITS`, `Parquet`, `NumPy`, and `HepMC`.
+
+> **JSROOT version**: set by `JSROOT_MODULES` at the top of `index.php` (JSROOT 7.11.2 from jsDelivr). The viewer reads the static file URL when the web server serves it, because Apache answers multi-range requests. Otherwise it reads through `action=file`, which answers single-range requests.
 
 > **Perfetto UI endpoint** — the "Open in Perfetto" target is set by `perfettoOrigin` in the `CONFIG` object in `index.php` (defaults to `https://perfetto.web.cern.ch`).
 
@@ -62,7 +65,7 @@ Browser  ──GET /?action=file&path=/img.jpg──►  index.php  ──stream
          ◄──── inline file response / download ──────────────────────────────────────
 ```
 
-The `action=file` endpoint ensures previews and downloads work reliably even when direct static file access is not available or not configured the way the browser expects.
+The `action=file` endpoint ensures previews and downloads work reliably even when direct static file access is not available or not configured the way the browser expects. It answers single-range `Range` requests with `206 Partial Content`, so text previews and JSROOT read only part of a large file.
 
 ---
 

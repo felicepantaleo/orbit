@@ -12,6 +12,9 @@ define('VERSION', '1.1.0');
 
 // ─── CONSTANTS (must be defined before any function calls) ────────────────────
 
+// JSROOT ES modules for the ROOT file viewer (pinned version).
+define('JSROOT_MODULES', 'https://cdn.jsdelivr.net/npm/jsroot@7.11.2/modules');
+
 define('IMAGE_EXTS', ['jpg','jpeg','png','gif','webp','svg','bmp','tiff','tif','ico','avif']);
 
 define('TYPE_MAP', [
@@ -19,13 +22,16 @@ define('TYPE_MAP', [
     'pdf'      => ['pdf'],
     'video'    => ['mp4','avi','mov','mkv','webm','wmv','m4v','ogv'],
     'audio'    => ['mp3','wav','ogg','flac','m4a','aac','opus'],
-    'code'     => ['py','cpp','cxx','cc','c','h','hpp','java','js','ts','jsx','tsx','html',
-                   'css','php','sh','bash','rb','go','rs','swift','kt','r','m','f90','f','jl'],
+    'code'     => ['py','cpp','cxx','cc','c','h','hpp','hh','hxx','icc','ipp','tcc','inl','cu','cuh',
+                   'java','js','mjs','ts','jsx','tsx','html','css','php','sh','bash','zsh','csh','tcsh',
+                   'rb','go','rs','swift','kt','r','m','f90','f','jl','pl','lua','sql','cmake','mk',
+                   'toml','diff','patch','proto','pyi','pyx','scala'],
     'data'     => ['csv','tsv','json','xml','yaml','yml','hdf5','h5','root','parquet',
                    'feather','npy','npz','fits','dat','bin','hepmc'],
     'graph'    => ['dot','gv'],
     'trace'    => ['perfetto-trace','perfetto_trace','pftrace','perfetto'],
-    'document' => ['txt','md','rst','tex','doc','docx','xls','xlsx','ppt','pptx','odt','ods','odp'],
+    'document' => ['txt','md','rst','tex','log','out','err','stdout','stderr','text',
+                   'doc','docx','xls','xlsx','ppt','pptx','odt','ods','odp'],
     'archive'  => ['zip','tar','gz','bz2','xz','7z','rar','tgz','tar.gz','tar.bz2'],
     'notebook' => ['ipynb'],
 ]);
@@ -66,6 +72,14 @@ if (isset($_GET['action'])) {
                 $path = get_safe_path($_GET['path'] ?? '/');
                 $download = isset($_GET['download']) && $_GET['download'] === '1';
                 stream_file($path, $download);
+                break;
+            case 'jsroot':
+                $path = get_safe_path($_GET['path'] ?? '/');
+                if (!is_file($path) || strtolower(pathinfo($path, PATHINFO_EXTENSION)) !== 'root') {
+                    throw new Exception('Not a ROOT file');
+                }
+                header('Content-Type: text/html; charset=utf-8');
+                echo jsroot_viewer_html(str_replace(BASE_DIR, '', $path));
                 break;
             case 'favicon':
                 header('Content-Type: image/svg+xml; charset=utf-8');
@@ -110,6 +124,63 @@ function orbit_favicon_svg(): string
   <circle cx="26.4" cy="10" r="2.2" fill="#ffffff"/>
 </svg>
 SVG;
+}
+
+// ─── ROOT FILE VIEWER (JSROOT) ───────────────────────────────────────────────
+//
+// Full-page JSROOT browser for one ROOT file. The preview modal embeds it in an
+// iframe, and "Open in new tab" opens it directly. JSROOT reads the file with
+// HTTP range requests. It uses the static file URL (Apache serves multi-range
+// requests) and falls back to the action=file endpoint (single ranges only).
+
+function jsroot_viewer_html(string $rel_path): string
+{
+    $flags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES;
+    $js_path = json_encode($rel_path, $flags);
+    $js_mods = json_encode(JSROOT_MODULES, $flags);
+    $title   = htmlspecialchars(basename($rel_path), ENT_QUOTES, 'UTF-8');
+    return <<<HTML
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{$title} · JSROOT</title>
+<link rel="icon" href="?action=favicon" type="image/svg+xml">
+<style>
+  html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
+  #orbit-jsroot-error { padding: 24px; color: #b91c1c; }
+</style>
+</head>
+<body>
+<div id="gui"></div>
+<script type="module">
+const path = {$js_path};
+const base = location.origin + location.pathname.replace(/[^/]*$/, '');
+const staticUrl = base + path.replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
+const proxyUrl  = base + '?' + new URLSearchParams({ action: 'file', path }).toString();
+
+async function pickUrl() {
+  try {
+    const res = await fetch(staticUrl, { method: 'HEAD', cache: 'no-store' });
+    const type = res.headers.get('Content-Type') || '';
+    if (res.ok && !type.startsWith('text/html')) return staticUrl;
+  } catch (e) { /* use the proxy */ }
+  return proxyUrl;
+}
+
+try {
+  const { buildGUI } = await import({$js_mods} + '/gui.mjs');
+  const [hpainter, url] = await Promise.all([buildGUI('gui'), pickUrl()]);
+  await hpainter.openRootFile(url);
+} catch (e) {
+  document.body.innerHTML = '<div id="orbit-jsroot-error"></div>';
+  document.getElementById('orbit-jsroot-error').textContent = 'Cannot open the ROOT file: ' + (e && e.message ? e.message : e);
+}
+</script>
+</body>
+</html>
+HTML;
 }
 
 // ─── PATH SECURITY ────────────────────────────────────────────────────────────
@@ -168,17 +239,66 @@ function stream_file(string $full_path, bool $download = false): void
         throw new Exception('Cannot open file');
     }
 
+    // Serve a single byte range ("bytes=a-b", "bytes=a-" or "bytes=-n") with 206.
+    // A multi-range request gets the full file with 200, as RFC 9110 allows.
+    $start = 0;
+    $end   = $size - 1;
+    $partial = false;
+    $range = trim($_SERVER['HTTP_RANGE'] ?? '');
+    if ($range !== '' && preg_match('/^bytes=(\d*)-(\d*)$/', $range, $m) && ($m[1] !== '' || $m[2] !== '')) {
+        if ($m[1] === '') {
+            $start = max(0, $size - (int)$m[2]);
+        } else {
+            $start = (int)$m[1];
+            if ($m[2] !== '') {
+                $end = min((int)$m[2], $size - 1);
+            }
+        }
+        if ($size === 0 || $start > $end) {
+            fclose($fp);
+            header_remove('Content-Type');
+            http_response_code(416);
+            header('Content-Range: bytes */' . (string)$size);
+            return;
+        }
+        $partial = true;
+    }
+    $length = $end - $start + 1;
+
     header_remove('Content-Type');
     header('Content-Type: ' . $mime);
-    header('Content-Length: ' . (string)$size);
+    header('Accept-Ranges: bytes');
     header(sprintf(
         "Content-Disposition: %s; filename=\"%s\"; filename*=UTF-8''%s",
         $download ? 'attachment' : 'inline',
         rawurlencode($name),
         rawurlencode($name)
     ));
-    header('Accept-Ranges: bytes');
-    fpassthru($fp);
+    if ($partial) {
+        http_response_code(206);
+        header(sprintf('Content-Range: bytes %d-%d/%d', $start, $end, $size));
+    }
+    header('Content-Length: ' . (string)max(0, $length));
+
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'HEAD') {
+        fclose($fp);
+        return;
+    }
+    if (!$partial) {
+        fpassthru($fp);
+        fclose($fp);
+        return;
+    }
+    fseek($fp, $start);
+    $left = $length;
+    while ($left > 0 && !feof($fp)) {
+        $chunk = fread($fp, min(65536, $left));
+        if ($chunk === false || $chunk === '') {
+            break;
+        }
+        echo $chunk;
+        $left -= strlen($chunk);
+    }
     fclose($fp);
 }
 
@@ -883,8 +1003,26 @@ function search_files(string $base_path, string $query, int $max = 200): array
     }
 
     /* text/code preview */
+    .text-view, .root-view { display: flex; flex-direction: column; gap: 8px; }
+    .text-toolbar {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      font-size: .8rem; color: #cdd6f4;
+    }
+    .text-toolbar-info { margin-right: auto; opacity: .8; }
+    .text-toolbar button {
+      font: inherit; padding: 3px 10px; border-radius: 6px; cursor: pointer;
+      border: 1px solid #45475a; background: #313244; color: #cdd6f4;
+    }
+    .text-toolbar button:disabled { opacity: .4; cursor: default; }
+    .text-toolbar button[aria-pressed="true"] { background: #585b70; }
+    .text-toolbar .btn-primary { font-size: .78rem; padding: 4px 12px; text-decoration: none; }
+    #preview-text.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+    #preview-root {
+      width: min(1200px, 95vw); height: calc(100vh - 170px);
+      border: none; border-radius: var(--radius); background: #fff;
+    }
     #preview-text {
-      width: min(900px, 95vw); max-height: calc(100vh - 130px);
+      width: min(900px, 95vw); max-height: calc(100vh - 170px);
       overflow: auto; background: #1e1e2e; color: #cdd6f4;
       border-radius: var(--radius); padding: 20px;
       font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
@@ -1179,9 +1317,16 @@ function search_files(string $base_path, string $query, int $max = 200): array
 // ═══════════════════════════════════════════════════════════════
 const CONFIG = {
   defaultView:  'grid',          // 'grid' | 'list'
-  previewText:  ['txt','md','rst','json','yaml','yml','xml','csv','py','js',
-                 'ts','html','css','sh','r','cpp','c','h','java','go','rs','tex'],
-  maxTextSize:  512 * 1024,      // 512 KB
+  previewText:  ['txt','md','rst','tex','log','out','err','stdout','stderr','text',
+                 'json','jsonl','ndjson','yaml','yml','xml','csv','tsv','toml','cfg','dot','gv',
+                 'py','pyi','pyx','js','mjs','ts','jsx','tsx','html','css','sh','bash','zsh','csh','tcsh',
+                 'r','m','jl','pl','lua','sql','rb','go','rs','swift','kt','scala','java',
+                 'cpp','cxx','cc','c','h','hpp','hh','hxx','icc','ipp','tcc','inl','cu','cuh',
+                 'f','f90','cmake','mk','diff','patch','proto','dat'],
+  // Logs open at the end, where errors and the job summary are.
+  previewTailFirst: ['log','out','err','stdout','stderr'],
+  maxTextSize:  512 * 1024,      // larger text files show one 512 KB window (head or tail)
+  sniffBytes:   4096,            // bytes read to decide if a file of unknown type is text
   searchDelay:  300,             // ms debounce
   imgLazyThreshold: 200,         // px below viewport
   graphMaxRenderBytes: 3 * 1024 * 1024,  // render .dot interactively up to 3 MB; larger -> pre-rendered SVG
@@ -1668,7 +1813,13 @@ async function renderPreviewContent(item, body) {
     return;
   }
 
-  if (CONFIG.previewText.includes(item.extension)) {
+  if (item.extension === 'root') {
+    previewRoot(item, body);
+    return;
+  }
+
+  if (CONFIG.previewText.includes(item.extension) ||
+      ((item.type === 'other' || item.extension === '') && await looksLikeText(path))) {
     await previewText(item, body, path);
     return;
   }
@@ -1714,19 +1865,126 @@ function openInPerfetto(item) {
   window.open(deepLink, '_blank', 'noopener');
 }
 
-async function previewText(item, body, path) {
+// Reads at most `limit` bytes of a response body, then cancels the download.
+async function readBytes(res, limit) {
+  if (!res.body) return new Uint8Array(await res.arrayBuffer()).subarray(0, limit);
+  const reader = res.body.getReader();
+  const out = new Uint8Array(limit);
+  let n = 0;
+  while (n < limit) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const take = Math.min(value.length, limit - n);
+    out.set(value.subarray(0, take), n);
+    n += take;
+  }
+  reader.cancel().catch(() => {});
+  return out.subarray(0, n);
+}
+
+// A NUL byte in the first bytes marks a binary file.
+function isBinary(bytes) {
+  return bytes.subarray(0, CONFIG.sniffBytes).includes(0);
+}
+
+async function looksLikeText(path) {
   try {
-    const res = await fetch(path);
-    if (!res.ok) throw new Error('Could not fetch file');
-    const text = await res.text();
-    const pre  = document.createElement('pre');
+    const res = await fetch(path, { headers: { Range: `bytes=0-${CONFIG.sniffBytes - 1}` } });
+    if (!res.ok) return false;
+    return !isBinary(await readBytes(res, CONFIG.sniffBytes));
+  } catch (e) {
+    return false;
+  }
+}
+
+// Fetches one window of a text file: the whole file, or the first or last
+// CONFIG.maxTextSize bytes. Returns { text, partial, fromEnd }.
+async function fetchTextWindow(path, size, fromEnd) {
+  const max = CONFIG.maxTextSize;
+  const big = size !== null && size > max;
+  const headers = big ? { Range: fromEnd ? `bytes=-${max}` : `bytes=0-${max - 1}` } : {};
+  const res = await fetch(path, { headers });
+  if (!res.ok) throw new Error('Could not fetch file');
+  // A server that ignores Range sends the whole file with 200: keep the head only.
+  const ranged = res.status === 206;
+  const bytes = await readBytes(res, max);
+  if (isBinary(bytes)) throw new Error('This file contains binary data');
+  let text = new TextDecoder('utf-8').decode(bytes);
+  const partial = big || bytes.length >= max;
+  const tail = ranged && fromEnd;
+  // Drop the line that the window boundary cuts.
+  if (partial && tail) text = text.slice(text.indexOf('\n') + 1);
+  else if (partial) text = text.slice(0, text.lastIndexOf('\n') + 1) || text;
+  return { text, partial, fromEnd: tail };
+}
+
+async function previewText(item, body, path, fromEnd = null) {
+  if (fromEnd === null) fromEnd = CONFIG.previewTailFirst.includes(item.extension);
+  try {
+    const { text, partial, fromEnd: tail } = await fetchTextWindow(path, item.size, fromEnd);
+    const wrap = localStorageGet('orbit-text-wrap') === '1';
+    const bar = document.createElement('div');
+    bar.className = 'text-toolbar';
+    const where = partial
+      ? `${tail ? 'Last' : 'First'} ${formatSize(CONFIG.maxTextSize)} of ${formatSize(item.size)}`
+      : `${(text.split('\n').length - (text.endsWith('\n') ? 1 : 0)).toLocaleString()} lines · ${formatSize(item.size)}`;
+    bar.innerHTML =
+      `<span class="text-toolbar-info">${esc(where)}</span>` +
+      (partial ? `<button type="button" data-act="head" ${tail ? '' : 'disabled'}>⇤ Start</button>` +
+                 `<button type="button" data-act="tail" ${tail ? 'disabled' : ''}>End ⇥</button>` : '') +
+      `<button type="button" data-act="wrap" aria-pressed="${wrap}">↩ Wrap</button>`;
+    const pre = document.createElement('pre');
     pre.id = 'preview-text';
+    pre.classList.toggle('wrap', wrap);
     pre.textContent = text;
+    const box = document.createElement('div');
+    box.className = 'text-view';
+    box.append(bar, pre);
     body.innerHTML = '';
-    body.appendChild(pre);
+    body.appendChild(box);
+    if (tail) pre.scrollTop = pre.scrollHeight;
+
+    bar.addEventListener('click', e => {
+      const act = e.target.closest('button')?.dataset.act;
+      if (act === 'wrap') {
+        const on = !pre.classList.contains('wrap');
+        pre.classList.toggle('wrap', on);
+        e.target.closest('button').setAttribute('aria-pressed', String(on));
+        localStorageSet('orbit-text-wrap', on ? '1' : '0');
+      } else if (act === 'head' || act === 'tail') {
+        body.innerHTML = '<div class="state-box"><div class="spinner"></div><p>Loading preview…</p></div>';
+        previewText(item, body, path, act === 'tail');
+      }
+    });
   } catch (e) {
     body.innerHTML = errorBox(e.message);
   }
+}
+
+function localStorageGet(key) {
+  try { return localStorage.getItem(key); } catch (e) { return null; }
+}
+function localStorageSet(key, value) {
+  try { localStorage.setItem(key, value); } catch (e) { /* storage is optional */ }
+}
+
+// ── ROOT files: JSROOT browser ──────────────────────────────────────────────
+function jsrootViewerUrl(path) {
+  const params = new URLSearchParams({ action: 'jsroot', path });
+  if (document.documentElement.getAttribute('data-theme') === 'dark') params.set('dark', '');
+  return orbitBaseUrl() + '?' + params.toString();
+}
+
+function previewRoot(item, body) {
+  const url = jsrootViewerUrl(item.path);
+  body.innerHTML = `
+    <div class="root-view">
+      <div class="text-toolbar">
+        <span class="text-toolbar-info">JSROOT · click an object in the tree to draw it</span>
+        <a class="btn-primary" href="${esc(url)}" target="_blank" rel="noopener">Open in new tab ↗</a>
+      </div>
+      <iframe id="preview-root" src="${esc(url)}" title="${esc(item.name)}"></iframe>
+    </div>`;
 }
 
 // ── Graphviz (.dot/.gv) interactive preview ─────────────────────────────────
